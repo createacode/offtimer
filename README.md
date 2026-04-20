@@ -1,6 +1,8 @@
 # offtimer
 一款色泽艳丽，简洁好用的定时关机程序，可以实现win10/win11的定时关机，清理进程等功能，支持开机自启，记忆定时时间，采用C++开发，使用MSYS2 UCRT64编译。
 
+![软件截图](https://github.com/createacode/offtimer/blob/main/offtimer.png)
+
 
 # 定时关机程序（Windows版）使用说明
 
