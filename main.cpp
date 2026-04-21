@@ -185,6 +185,23 @@ static void closeLogFile()
     }
 }
 
+// 辅助函数：创建非模态自动关闭的消息框
+static QMessageBox* createNonModalMessageBox(QWidget *parent, QMessageBox::Icon icon,
+                                             const QString &title, const QString &text,
+                                             QMessageBox::StandardButtons buttons,
+                                             int autoCloseSeconds = 30)
+{
+    QMessageBox *msgBox = new QMessageBox(icon, title, text, buttons, parent);
+    msgBox->setAttribute(Qt::WA_DeleteOnClose);
+    msgBox->setModal(false);
+    if (buttons & QMessageBox::Yes)
+        msgBox->setDefaultButton(QMessageBox::Yes);
+    else if (buttons & QMessageBox::Ok)
+        msgBox->setDefaultButton(QMessageBox::Ok);
+    QTimer::singleShot(autoCloseSeconds * 1000, msgBox, &QMessageBox::close);
+    return msgBox;
+}
+
 MainWindow::MainWindow(bool silentMode, QWidget *parent)
     : QMainWindow(parent),
       delayedShutdownTimer(nullptr),
@@ -198,9 +215,9 @@ MainWindow::MainWindow(bool silentMode, QWidget *parent)
 
     sharedMemory = new QSharedMemory("APP121411_SINGLE_INSTANCE_KEY", this);
     if (sharedMemory->attach()) {
-        QMessageBox msgBox(QMessageBox::Warning, "提示", "程序已在运行中！", QMessageBox::Ok);
-        msgBox.button(QMessageBox::Ok)->setText("确定");
-        msgBox.exec();
+        QMessageBox *msgBox = createNonModalMessageBox(nullptr, QMessageBox::Warning, "提示",
+                                                       "程序已在运行中！", QMessageBox::Ok, 30);
+        msgBox->show();
         QTimer::singleShot(0, qApp, &QCoreApplication::quit);
         return;
     }
@@ -282,7 +299,7 @@ void MainWindow::setupUI()
 
     hourSpin = new DoubleSpinBox(this);
     hourSpin->setRange(0, 23);
-    hourSpin->setWrapping(true);  // 开启循环滚动
+    hourSpin->setWrapping(true);
     hourSpin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
     hourSpin->setFixedSize(80, 34);
     hourSpin->setAlignment(Qt::AlignCenter);
@@ -317,7 +334,7 @@ void MainWindow::setupUI()
 
     minuteSpin = new DoubleSpinBox(this);
     minuteSpin->setRange(0, 59);
-    minuteSpin->setWrapping(true);  // 开启循环滚动
+    minuteSpin->setWrapping(true);
     minuteSpin->setButtonSymbols(QAbstractSpinBox::UpDownArrows);
     minuteSpin->setFixedSize(80, 34);
     minuteSpin->setAlignment(Qt::AlignCenter);
@@ -458,17 +475,18 @@ void MainWindow::onTrayActivated(QSystemTrayIcon::ActivationReason reason)
 
 void MainWindow::onExitProgram()
 {
-    QMessageBox *msgBox = new QMessageBox(QMessageBox::Warning, "确认退出", 
-                                           "定时关机将失效，确定退出程序吗？",
-                                           QMessageBox::Yes | QMessageBox::No, this);
-    msgBox->setDefaultButton(QMessageBox::No);
+    QMessageBox *msgBox = createNonModalMessageBox(this, QMessageBox::Warning, "确认退出",
+                                                   "定时关机将失效，确定退出程序吗？",
+                                                   QMessageBox::Yes | QMessageBox::No, 30);
     msgBox->button(QMessageBox::Yes)->setText("是");
     msgBox->button(QMessageBox::No)->setText("否");
-    QTimer::singleShot(30000, msgBox, &QMessageBox::close);
-    if (msgBox->exec() == QMessageBox::Yes) {
-        closeLogFile();
-        qApp->quit();
-    }
+    connect(msgBox, &QMessageBox::finished, this, [this](int result) {
+        if (result == QMessageBox::Yes) {
+            closeLogFile();
+            qApp->quit();
+        }
+    });
+    msgBox->show();
 }
 
 void MainWindow::onTimedShutdown()
@@ -480,40 +498,62 @@ void MainWindow::onTimedShutdown()
     writeLog(QString("已设定定时关机时间: %1时%2分")
              .arg(scheduledHour, 2, 10, QChar('0'))
              .arg(scheduledMinute, 2, 10, QChar('0')));
-    QMessageBox::information(this, "定时关机", 
-                             QString("已设定在 %1:%2 执行关机")
-                             .arg(scheduledHour, 2, 10, QChar('0'))
-                             .arg(scheduledMinute, 2, 10, QChar('0')));
+    QMessageBox *infoBox = createNonModalMessageBox(this, QMessageBox::Information, "定时关机",
+                                                    QString("已设定在 %1:%2 执行关机")
+                                                    .arg(scheduledHour, 2, 10, QChar('0'))
+                                                    .arg(scheduledMinute, 2, 10, QChar('0')),
+                                                    QMessageBox::Ok, 30);
+    infoBox->show();
 }
 
 void MainWindow::onImmediateShutdown()
 {
-    QMessageBox *msgBox = new QMessageBox(QMessageBox::Warning, "立即关机", 
-                                          "系统将清理进程后强制关机，是否继续？",
-                                          QMessageBox::Yes | QMessageBox::No, this);
-    msgBox->setDefaultButton(QMessageBox::No);
+    QMessageBox *msgBox = createNonModalMessageBox(this, QMessageBox::Warning, "立即关机",
+                                                   "系统将清理进程后强制关机，是否继续？",
+                                                   QMessageBox::Yes | QMessageBox::No, 30);
     msgBox->button(QMessageBox::Yes)->setText("是");
     msgBox->button(QMessageBox::No)->setText("否");
-    QTimer::singleShot(120000, msgBox, [msgBox]() {
-        if (msgBox->isVisible())
-            msgBox->button(QMessageBox::Yes)->click();
+    connect(msgBox, &QMessageBox::finished, this, [this](int result) {
+        if (result == QMessageBox::Yes) {
+            writeLog("用户确认立即关机");
+            performShutdownWithCleanup();
+        } else if (result == QMessageBox::No) {
+            writeLog("用户取消立即关机");
+        } else {
+            // 自动关闭（30秒无操作）
+            writeLog("30秒无操作默认取消立即关机");
+        }
     });
-    if (msgBox->exec() == QMessageBox::Yes) {
-        writeLog("用户确认立即关机");
-        performShutdownWithCleanup();
-    } else {
-        writeLog("用户取消立即关机");
-    }
+    msgBox->show();
 }
 
 void MainWindow::onCleanup()
 {
-    writeLog("开始执行一键清理...");
-    MemInfo info = killNonSystemProcesses();
-    writeLog(QString("系统总内存: %1 MB").arg(info.totalPhysMB));
-    writeLog(QString("清理释放内存: %1 MB").arg(info.freedMB));
-    writeLog(QString("清理后空闲内存占比: %1%").arg(info.freePercent));
-    QMessageBox::information(this, "一键清理", QString("释放内存 %1 MB，当前空闲内存占比 %2%").arg(info.freedMB).arg(info.freePercent));
+    QMessageBox *msgBox = createNonModalMessageBox(this, QMessageBox::Question, "一键清理",
+                                                   "将终止所有非系统用户进程，是否继续？",
+                                                   QMessageBox::Yes | QMessageBox::No, 30);
+    msgBox->button(QMessageBox::Yes)->setText("是");
+    msgBox->button(QMessageBox::No)->setText("否");
+    connect(msgBox, &QMessageBox::finished, this, [this](int result) {
+        if (result == QMessageBox::Yes) {
+            writeLog("开始执行一键清理...");
+            MemInfo info = killNonSystemProcesses();
+            writeLog(QString("系统总内存: %1 MB").arg(info.totalPhysMB));
+            writeLog(QString("清理释放内存: %1 MB").arg(info.freedMB));
+            writeLog(QString("清理后空闲内存占比: %1%").arg(info.freePercent));
+            QMessageBox *resultBox = createNonModalMessageBox(this, QMessageBox::Information, "一键清理",
+                                                              QString("释放内存 %1 MB，当前空闲内存占比 %2%")
+                                                              .arg(info.freedMB).arg(info.freePercent),
+                                                              QMessageBox::Ok, 30);
+            resultBox->show();
+        } else if (result == QMessageBox::No) {
+            writeLog("用户取消一键清理");
+        } else {
+            // 自动关闭（30秒无操作）
+            writeLog("30秒无操作默认取消一键清理");
+        }
+    });
+    msgBox->show();
 }
 
 void MainWindow::performShutdownWithCleanup()
@@ -554,6 +594,7 @@ void MainWindow::onTimerCheck()
         shutdownConfirmBox->setModal(false);
         shutdownConfirmBox->button(QMessageBox::Yes)->setText("是");
         shutdownConfirmBox->button(QMessageBox::No)->setText("否");
+        QTimer::singleShot(90000, shutdownConfirmBox, &QMessageBox::close);
 
         delayedShutdownTimer = new QTimer(this);
         delayedShutdownTimer->setSingleShot(true);
@@ -562,8 +603,6 @@ void MainWindow::onTimerCheck()
             performShutdownWithCleanup();
         });
         delayedShutdownTimer->start(120000);
-
-        QTimer::singleShot(30000, shutdownConfirmBox, &QMessageBox::close);
 
         connect(shutdownConfirmBox, &QMessageBox::finished, this, [this](int result) {
             if (result == QMessageBox::Yes) {
