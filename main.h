@@ -19,7 +19,6 @@
 #include <QPointer>
 #include <QDir>
 
-// 自定义两位数显示的 QSpinBox（不重写 stepBy，使用 setWrapping）
 class DoubleSpinBox : public QSpinBox {
     Q_OBJECT
 public:
@@ -32,13 +31,11 @@ public:
     }
 };
 
-// 进程清理排除列表
 extern const QStringList excludedProcesses;
 
-// 执行完全关机
+// 增强的强制关机函数（解决卡断电问题）
 bool PerformForceShutdown();
 
-// 结束非系统进程，返回内存信息
 struct MemInfo {
     quint64 totalPhysMB;
     quint64 freeBeforeMB;
@@ -48,10 +45,8 @@ struct MemInfo {
 };
 MemInfo killNonSystemProcesses();
 
-// 写入窗口和文件日志
 void logMessage(const QString &msg, QTextEdit *textEdit);
 
-// 全局日志文件句柄
 extern QFile *logFile;
 extern QTextStream *logStream;
 
